@@ -1,6 +1,6 @@
 # main.py
 from core.calibrator import MaterialCalibrator
-from optimization.pressure_optimizer import PressureDependentOptimizer
+from optimization.pressure_optimizer import MaterialCalibrationOptimizer
 from visualization.plotter import CalibrationDashboard
 import threading
 import os
@@ -11,7 +11,7 @@ def main():
     
     # Initialize components
     calibrator = MaterialCalibrator("config.yaml")
-    optimizer = PressureDependentOptimizer(calibrator)
+    optimizer = MaterialCalibrationOptimizer(calibrator)
     
     # Create dashboard - this must happen before starting optimization thread
     dashboard = CalibrationDashboard(calibrator)
