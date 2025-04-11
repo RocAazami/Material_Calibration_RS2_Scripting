@@ -16,7 +16,7 @@ class MaterialCalibrationOptimizer:
             maxiter=self.calibrator.config['optimization']['max_iterations'],
             popsize=15,
             tol=0.01,
-            disp=True
+            disp=True            
         )
         
         refined = minimize(

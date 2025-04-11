@@ -89,7 +89,7 @@ class CalibrationDashboard:
             [Input('btn-volumetric', 'n_clicks'),
              Input('btn-pore-pressure', 'n_clicks')],
             [State('update-trigger', 'data')],
-            prevent_initial_call=True
+            prevent_initial_call=False
         )
         def update_button_styles(vol_clicks, pp_clicks, current_trigger):
             ctx = dash.callback_context
@@ -123,29 +123,75 @@ class CalibrationDashboard:
             [Input('progress-update', 'n_intervals'),
              Input('update-trigger', 'data')],
             [State('right-graph-mode-store', 'data')],
-            prevent_initial_call=True
+            prevent_initial_call=False
         )
         def update_plots(n_intervals, trigger, graph_mode):
-            if not hasattr(self.calibrator, 'history') or not self.calibrator.history:
-                raise PreventUpdate
+            print("\n=== Starting plot update ===")  # Debug
+ 
+            # 1. Check calibrator state
+            # Validate calibrator state
+            if not hasattr(self.calibrator, 'history'):
+                print("ERROR: Calibrator missing history attribute")
+                return [self._create_empty_figure("Calibrator not initialized")] * 3 + [self._create_error_figure()]
                 
-            current = self.calibrator.history[-1]
-            test_name = list(current['results'].keys())[0]
-            exp_data = self.calibrator.data_loader.tests[test_name]
-            num_data = current['results'][test_name]
-            
-            if graph_mode == 'volumetric':
-                right_fig = self._create_volumetric_figure(exp_data, num_data)
-            else:
-                right_fig = self._create_pore_pressure_figure(exp_data, num_data)
-            
-            return (
-                self._create_stress_strain_figure(exp_data, num_data),
-                self._create_stress_path_figure(exp_data, num_data),
-                right_fig,
-                self._create_error_figure()
-            )
+            if not self.calibrator.history:
+                print("ERROR: No history data available")
+                return [self._create_empty_figure("No calibration runs yet")] * 3 + [self._create_error_figure()]
 
+            current = self.calibrator.history[-1]
+            print(f"DEBUG: Current history entry has {len(current['results'])} test(s)")
+
+            # 2. Get visible tests from config
+            try:
+                visible_tests = self.calibrator.config['output']['visualization']['visible_tests']
+                print(f"DEBUG: Visible tests from config: {visible_tests}")
+            except (KeyError, TypeError) as e:
+                print(f"DEBUG: Config access error - using first available test: {str(e)}")
+                visible_tests = list(current['results'].keys())[:1]  # Fallback to first test
+
+            # 3. Collect data for all visible tests
+            test_data = []
+            for test_name in visible_tests:
+                try:
+                    print(f"DEBUG: Processing test {test_name}...")
+                    exp_data = self.calibrator.data_loader.tests[test_name]
+                    num_data = current['results'][test_name]
+                    test_data.append({
+                        'exp': exp_data,
+                        'num': num_data,
+                        'name': test_name,
+                        'cell_pressure': exp_data.get('cell_pressure', 'N/A')
+                    })
+                    print(f"DEBUG: Added test {test_name} (pressure: {exp_data.get('cell_pressure', 'N/A')}kPa)")
+                except KeyError as e:
+                    print(f"DEBUG: Skipping {test_name} - missing data: {str(e)}")
+                    continue
+                    
+            if not test_data:
+                print("DEBUG: No valid test data collected")
+                print(f"ERROR: {error_msg}")
+                return [self._create_empty_figure(error_msg)] * 3 + [self._create_error_figure()]
+
+
+            # 4. Create figures with all tests
+            try:
+                print(f"DEBUG: Creating figures for {len(test_data)} tests")
+                
+                figures = [
+                    self._create_stress_strain_figure(test_data),
+                    self._create_stress_path_figure(test_data),
+                    self._create_volumetric_figure(test_data) if graph_mode == 'volumetric' 
+                        else self._create_pore_pressure_figure(test_data),
+                    self._create_error_figure()
+                ]
+                
+                return figures
+                
+            except Exception as e:
+                error_msg = f"Figure generation failed: {str(e)}"
+                print(f"ERROR: {error_msg}")
+                return [self._create_empty_figure(error_msg)] * 3 + [self._create_error_figure()]
+    
         # 3. Parameter updates (triggered by interval only)
         @self.app.callback(
             [Output('parameter-display', 'children'),
@@ -164,22 +210,27 @@ class CalibrationDashboard:
             )
 
     # [All figure creation methods remain exactly the same...]
-    def _create_stress_strain_figure(self, exp_data, num_data):
+ 
+    def _create_stress_strain_figure(self, test_data):
+        print(f"DEBUG: Creating stress-strain plot with {len(test_data)} tests")
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=exp_data['StrainYY'],
-            y=exp_data['StressYY'],
-            mode='markers',
-            name='Experimental',
-            marker=dict(color='red', size=8)
-        ))
-        fig.add_trace(go.Scatter(
-            x=num_data['StrainYY'],
-            y=num_data['StressYY'],
-            mode='lines',
-            name='Numerical',
-            line=dict(color='blue', width=2)
-        ))
+        
+        for data in test_data:
+            fig.add_trace(go.Scatter(
+                x=data['exp']['StrainYY'],
+                y=data['exp']['StressYY'],
+                mode='markers',
+                name=f"Exp {data['name']} ({data['cell_pressure']}kPa)",
+                marker=dict(color='red', size=8)
+            ))
+            fig.add_trace(go.Scatter(
+                x=data['num']['StrainYY'],
+                y=data['num']['StressYY'],
+                mode='lines',
+                name=f"Num {data['name']} ({data['cell_pressure']}kPa)",
+                line=dict(color='blue', width=2)
+            ))
+            
         fig.update_layout(
             title='Stress-Strain Response',
             xaxis_title='Axial Strain',
@@ -189,22 +240,26 @@ class CalibrationDashboard:
         )
         return fig
 
-    def _create_stress_path_figure(self, exp_data, num_data):
+    def _create_stress_path_figure(self, test_data):
+        print(f"DEBUG: Creating stress-path plot with {len(test_data)} tests")
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=exp_data['p'],
-            y=exp_data['q'],
-            mode='markers',
-            name='Experimental',
-            marker=dict(color='red', size=8)
-        ))
-        fig.add_trace(go.Scatter(
-            x=num_data['p'],
-            y=num_data['q'],
-            mode='lines',
-            name='Numerical',
-            line=dict(color='blue', width=2)
-        ))
+        
+        for data in test_data:
+            fig.add_trace(go.Scatter(
+                x=data['exp']['p'],
+                y=data['exp']['q'],
+                mode='markers',
+                name=f"Exp {data['name']} ({data['cell_pressure']}kPa)",
+                marker=dict(color='red', size=8)
+            ))
+            fig.add_trace(go.Scatter(
+                x=data['num']['p'],
+                y=data['num']['q'],
+                mode='lines',
+                name=f"Num {data['name']} ({data['cell_pressure']}kPa)",
+                line=dict(color='blue', width=2)
+            ))
+            
         fig.update_layout(
             title='Stress Path (p-q space)',
             xaxis_title='Mean Stress (kPa)',
@@ -214,23 +269,27 @@ class CalibrationDashboard:
         )
         return fig
 
-    def _create_volumetric_figure(self, exp_data, num_data):
+    def _create_volumetric_figure(self, test_data):
+        print(f"DEBUG: Creating volumetric plot with {len(test_data)} tests")
         fig = go.Figure()
-        if 'Volumetric_Strain' in exp_data and 'Volumetric_Strain' in num_data:
-            fig.add_trace(go.Scatter(
-                x=exp_data['StrainYY'],
-                y=exp_data['Volumetric_Strain'],
-                mode='markers',
-                name='Experimental',
-                marker=dict(color='blue', size=8)
-            ))
-            fig.add_trace(go.Scatter(
-                x=num_data['StrainYY'],
-                y=num_data['Volumetric_Strain'],
-                mode='lines',
-                name='Numerical',
-                line=dict(color='red', width=2)
-            ))
+        
+        for data in test_data:
+            if 'Volumetric_Strain' in data['exp'] and 'Volumetric_Strain' in data['num']:
+                fig.add_trace(go.Scatter(
+                    x=data['exp']['StrainYY'],
+                    y=data['exp']['Volumetric_Strain'],
+                    mode='markers',
+                    name=f"Exp {data['name']} ({data['cell_pressure']}kPa)",
+                    marker=dict(color='blue', size=8)
+                ))
+                fig.add_trace(go.Scatter(
+                    x=data['num']['StrainYY'],
+                    y=data['num']['Volumetric_Strain'],
+                    mode='lines',
+                    name=f"Num {data['name']} ({data['cell_pressure']}kPa)",
+                    line=dict(color='red', width=2)
+                ))
+                
         fig.update_layout(
             title='Volumetric Response',
             xaxis_title='Axial Strain',
@@ -240,37 +299,57 @@ class CalibrationDashboard:
         )
         return fig
 
-    def _create_pore_pressure_figure(self, exp_data, num_data):
+    def _create_pore_pressure_figure(self, test_data):
+        print(f"DEBUG: Creating pore pressure plot with {len(test_data)} tests")
         fig = go.Figure()
         
-        # Get initial cell pressure from the test configuration
-        initial_cell_pressure = exp_data.get('cell_pressure')
-        if initial_cell_pressure is None or 'p' not in exp_data or 'StrainYY' not in exp_data:
-            return fig  # Return empty figure if data is missing
-        
-        # Ensure initial_cell_pressure is a numpy array of the same length as p values
-        initial_pressures = np.full_like(exp_data['p'], initial_cell_pressure)
-        
-        # Calculate pore pressure response: initial cell pressure - current p
-        fig.add_trace(go.Scatter(
-            x=exp_data['StrainYY'],
-            y=initial_pressures - exp_data['p'],
-            mode='markers',
-            name='Experimental',
-            marker=dict(color='red', size=8)
-        ))
-        
-        if 'p' in num_data:
-            # Create array of initial pressures matching numerical data length
-            num_initial_pressures = np.full_like(num_data['p'], initial_cell_pressure)
-            fig.add_trace(go.Scatter(
-                x=num_data['StrainYY'],
-                y=num_initial_pressures - num_data['p'],
-                mode='lines',
-                name='Numerical',
-                line=dict(color='blue', width=2)
-            ))
-        
+        for data in test_data:
+            try:
+                exp = data['exp']
+                num = data['num']
+                cp = data['cell_pressure']
+                
+                # Validate required fields and types
+                if ('cell_pressure' not in exp or 
+                    'p' not in exp or 
+                    'StrainYY' not in exp or
+                    not isinstance(exp['p'], (np.ndarray, list))):
+                    print(f"DEBUG: Skipping {data['name']} - missing/invalid fields")
+                    continue
+                    
+                # Convert to numpy arrays for safe math operations
+                initial_p = float(exp['cell_pressure'])
+                exp_p = np.array(exp['p'])
+                exp_strain = np.array(exp['StrainYY'])
+                
+                # Calculate pore pressure response
+                exp_pore = initial_p - exp_p
+                
+                fig.add_trace(go.Scatter(
+                    x=exp_strain,
+                    y=exp_pore,
+                    mode='markers',
+                    name=f"Exp {data['name']} ({cp}kPa)",
+                    marker=dict(color='red', size=8)
+                ))
+                
+                if 'p' in num and isinstance(num['p'], (np.ndarray, list)):
+                    num_p = np.array(num['p'])
+                    num_strain = np.array(num['StrainYY'])
+                    num_pore = initial_p - num_p
+                    
+                    fig.add_trace(go.Scatter(
+                        x=num_strain,
+                        y=num_pore,
+                        mode='lines',
+                        name=f"Num {data['name']} ({cp}kPa)",
+                        line=dict(color='blue', width=2)
+                    ))
+                    
+            except Exception as e:
+                print(f"ERROR: Failed to process {data.get('name', 'unknown')} - {str(e)}")
+                continue
+                
         fig.update_layout(
             title='Pore Pressure Response',
             xaxis_title='Axial Strain',
@@ -336,6 +415,22 @@ class CalibrationDashboard:
                     html.Td("")
                 ]))
         return html.Table([html.Tbody(rows)], style={'width': '100%'})
+    def _create_empty_figure(self, message="No data available"):
+        """Create a figure with an error message"""
+        fig = go.Figure()
+        fig.update_layout(
+            title=message,
+            xaxis={"visible": False},
+            yaxis={"visible": False},
+            annotations=[{
+                "text": message,
+                "xref": "paper",
+                "yref": "paper",
+                "showarrow": False,
+                "font": {"size": 16}
+            }]
+        )
+        return fig
 
     def run(self):
         """Run the dashboard"""

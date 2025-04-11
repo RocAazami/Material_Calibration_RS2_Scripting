@@ -1,21 +1,36 @@
 material_model: "NorSand"
-reference_pressure: 100  # kPa
+
+base_models:
+  drained_100: "RS2_Models/NorSand - UTC - p0=100-Base Model.fez"  # Base models now in RS2_Models
+  drained_200: "RS2_Models/NorSand - UTC - p0=200-Base Model.fez"
 
 experimental_data:
   - type: "drained_100"
     filepath: "data/drained/100kPa.csv"
     cell_pressure: 100
+    drainage: "drained"
     weight: 1.0
+    base_model: "$base_models.drained_100"
+
+  - type: "drained_200"
+    filepath: "data/drained/200kPa.csv"
+    cell_pressure: 200
+    drainage: "drained"
+    weight: 0.8
+    base_model: "$base_models.drained_200"
 
 parameters:
   M_tc: [1.2, 1.8]    
-  H_0:     [50, 300]    
+  H_0: [50, 300]    
   psi_0: [-0.05, 0.05]
-  
 
 optimization:
   method: "hybrid"
   max_iterations: 20
 
 output:
-  report_file: "results/calibration_report.html"
+  directory: "RS2_Models"
+  report_file: "calibration_report.html"
+  visualization:
+    #visible_tests: ["drained_100"]  # Add this section
+    visible_tests: ["drained_100", "drained_200"]  # Add this section

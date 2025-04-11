@@ -28,6 +28,6 @@ class ExperimentalDataLoader:
             'p': df['p'].values,
             'q': df['q'].values,
             'Volumetric_Strain': df['Volumetric_Strain'].values,            
-            'cell_pressure': 100,
+            'cell_pressure': cell_pressure,
             'failure_strain': df['StrainYY'].iloc[-1]  # Last strain as failure
         }
