@@ -1,5 +1,11 @@
 material_model: "NorSand"
 
+# Added parallel processing configuration
+parallel_processing:
+  workers: 3  # Number of parallel workers
+  modeler_base_port: 60054  # Base port for modelers
+  interpreter_base_port: 60154  # Base port for interpreters
+
 base_models:
   drained_100: "RS2_Models/NorSand - UTC - p0=100-Base Model.fez"  # Base models now in RS2_Models
   drained_200: "RS2_Models/NorSand - UTC - p0=200-Base Model.fez"
@@ -32,5 +38,4 @@ output:
   directory: "RS2_Models"
   report_file: "calibration_report.html"
   visualization:
-    #visible_tests: ["drained_100"]  # Add this section
-    visible_tests: ["drained_100", "drained_200"]  # Add this section
+    visible_tests: ["drained_100", "drained_200"]

@@ -126,34 +126,34 @@ class CalibrationDashboard:
             prevent_initial_call=False
         )
         def update_plots(n_intervals, trigger, graph_mode):
-            print("\n=== Starting plot update ===")  # Debug
+            #print("\n=== Starting plot update ===")  # Debug
  
             # 1. Check calibrator state
             # Validate calibrator state
             if not hasattr(self.calibrator, 'history'):
-                print("ERROR: Calibrator missing history attribute")
+                #print("ERROR: Calibrator missing history attribute")
                 return [self._create_empty_figure("Calibrator not initialized")] * 3 + [self._create_error_figure()]
                 
             if not self.calibrator.history:
-                print("ERROR: No history data available")
+                #print("ERROR: No history data available")
                 return [self._create_empty_figure("No calibration runs yet")] * 3 + [self._create_error_figure()]
 
             current = self.calibrator.history[-1]
-            print(f"DEBUG: Current history entry has {len(current['results'])} test(s)")
+            #print(f"DEBUG: Current history entry has {len(current['results'])} test(s)")
 
             # 2. Get visible tests from config
             try:
                 visible_tests = self.calibrator.config['output']['visualization']['visible_tests']
-                print(f"DEBUG: Visible tests from config: {visible_tests}")
+                #print(f"DEBUG: Visible tests from config: {visible_tests}")
             except (KeyError, TypeError) as e:
-                print(f"DEBUG: Config access error - using first available test: {str(e)}")
+                #print(f"DEBUG: Config access error - using first available test: {str(e)}")
                 visible_tests = list(current['results'].keys())[:1]  # Fallback to first test
 
             # 3. Collect data for all visible tests
             test_data = []
             for test_name in visible_tests:
                 try:
-                    print(f"DEBUG: Processing test {test_name}...")
+                    #print(f"DEBUG: Processing test {test_name}...")
                     exp_data = self.calibrator.data_loader.tests[test_name]
                     num_data = current['results'][test_name]
                     test_data.append({
@@ -162,20 +162,20 @@ class CalibrationDashboard:
                         'name': test_name,
                         'cell_pressure': exp_data.get('cell_pressure', 'N/A')
                     })
-                    print(f"DEBUG: Added test {test_name} (pressure: {exp_data.get('cell_pressure', 'N/A')}kPa)")
+                    #print(f"DEBUG: Added test {test_name} (pressure: {exp_data.get('cell_pressure', 'N/A')}kPa)")
                 except KeyError as e:
-                    print(f"DEBUG: Skipping {test_name} - missing data: {str(e)}")
+                    #print(f"DEBUG: Skipping {test_name} - missing data: {str(e)}")
                     continue
                     
             if not test_data:
-                print("DEBUG: No valid test data collected")
-                print(f"ERROR: {error_msg}")
+                #print("DEBUG: No valid test data collected")
+                #print(f"ERROR: {error_msg}")
                 return [self._create_empty_figure(error_msg)] * 3 + [self._create_error_figure()]
 
 
             # 4. Create figures with all tests
             try:
-                print(f"DEBUG: Creating figures for {len(test_data)} tests")
+                #print(f"DEBUG: Creating figures for {len(test_data)} tests")
                 
                 figures = [
                     self._create_stress_strain_figure(test_data),
@@ -212,7 +212,7 @@ class CalibrationDashboard:
     # [All figure creation methods remain exactly the same...]
  
     def _create_stress_strain_figure(self, test_data):
-        print(f"DEBUG: Creating stress-strain plot with {len(test_data)} tests")
+        #print(f"DEBUG: Creating stress-strain plot with {len(test_data)} tests")
         fig = go.Figure()
         
         for data in test_data:
@@ -241,7 +241,7 @@ class CalibrationDashboard:
         return fig
 
     def _create_stress_path_figure(self, test_data):
-        print(f"DEBUG: Creating stress-path plot with {len(test_data)} tests")
+        #print(f"DEBUG: Creating stress-path plot with {len(test_data)} tests")
         fig = go.Figure()
         
         for data in test_data:
@@ -270,7 +270,7 @@ class CalibrationDashboard:
         return fig
 
     def _create_volumetric_figure(self, test_data):
-        print(f"DEBUG: Creating volumetric plot with {len(test_data)} tests")
+        #print(f"DEBUG: Creating volumetric plot with {len(test_data)} tests")
         fig = go.Figure()
         
         for data in test_data:
@@ -300,7 +300,7 @@ class CalibrationDashboard:
         return fig
 
     def _create_pore_pressure_figure(self, test_data):
-        print(f"DEBUG: Creating pore pressure plot with {len(test_data)} tests")
+        #print(f"DEBUG: Creating pore pressure plot with {len(test_data)} tests")
         fig = go.Figure()
         
         for data in test_data:
