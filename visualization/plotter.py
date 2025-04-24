@@ -6,21 +6,31 @@ from dash.exceptions import PreventUpdate
 import numpy as np
 
 class CalibrationDashboard:
-    def __init__(self, calibrator):
+    def __init__(self, calibrator, optimizer=None):
         self.calibrator = calibrator
+        self.optimizer = optimizer  # Now accepts the optimizer directly
         self.app = dash.Dash(__name__)
         self._setup_layout()
         self._setup_callbacks()
 
     def _setup_layout(self):
-        """Create the dashboard layout with proper alignment"""
+        """Create the dashboard layout with proper alignment and PSO controls"""
         self.app.layout = html.Div([
             # Hidden storage for the right graph mode and update trigger
-            dcc.Store(id='right-graph-mode-store', data='pore_pressure'),  # Changed default to pore_pressure
+            dcc.Store(id='right-graph-mode-store', data='pore_pressure'),
             dcc.Store(id='update-trigger', data=0),
             
             html.H1("RS2 Material Calibration Dashboard", 
                    style={'textAlign': 'center', 'marginBottom': '20px'}),
+            
+            # Optimization Controls
+            html.Div([
+                html.Button("Pause/Resume", id='btn-pause-resume', n_clicks=0,
+                          style={'marginRight': '10px'}),
+                html.Button("Stop", id='btn-stop', n_clicks=0,
+                          style={'marginRight': '10px'}),
+                html.Div(id='optimization-status', style={'display': 'inline-block'})
+            ], style={'textAlign': 'center', 'marginBottom': '20px'}),
             
             # First Row: Three plots in a flex container
             html.Div([
@@ -42,11 +52,11 @@ class CalibrationDashboard:
                         html.Button("Volumetric Response", 
                                   id='btn-volumetric',
                                   n_clicks=0,
-                                  style={'marginRight': '10px'}),  # Remove initial highlight
+                                  style={'marginRight': '10px'}),
                         html.Button("Pore Pressure Response", 
                                   id='btn-pore-pressure',
                                   n_clicks=0,
-                                  style={'marginRight': '10px', 'backgroundColor': 'lightblue'})  # Add initial highlight
+                                  style={'marginRight': '10px', 'backgroundColor': 'lightblue'})
                     ], style={'marginBottom': '10px', 'textAlign': 'center'}),
                     
                     dcc.Graph(id='right-graph',
@@ -78,7 +88,7 @@ class CalibrationDashboard:
         ], style={'padding': '20px'})
 
     def _setup_callbacks(self):
-        """Setup callbacks with completely separated triggers"""
+        """Setup callbacks with PSO control integration"""
         
         # 1. Button style updates and mode storage
         @self.app.callback(
@@ -101,20 +111,69 @@ class CalibrationDashboard:
             if button_id == 'btn-volumetric':
                 return (
                     {'marginRight': '10px', 'backgroundColor': 'lightblue'}, 
-                    {},
+                    {'marginRight': '10px'},
                     'volumetric',
                     current_trigger + 1
                 )
             else:
                 return (
                     {'marginRight': '10px'}, 
-                    {'backgroundColor': 'lightblue'},
+                    {'marginRight': '10px', 'backgroundColor': 'lightblue'},
                     'pore_pressure',
                     current_trigger + 1
                 )
+        
+        # 2. PSO Control callbacks
+        @self.app.callback(
+            [Output('optimization-status', 'children'),
+             Output('btn-pause-resume', 'children')],
+            [Input('btn-pause-resume', 'n_clicks'),
+             Input('btn-stop', 'n_clicks'),
+             Input('progress-update', 'n_intervals')],
+            prevent_initial_call=False
+        )
+        def update_optimization_controls(pause_clicks, stop_clicks, n_intervals):
+            ctx = dash.callback_context
+            
+            # Default status
+            status = "Optimization status: Not running"
+            button_text = "Pause/Resume"
+            
+            # Check if optimizer exists
+            if not hasattr(self, 'optimizer') or self.optimizer is None:
+                return status, button_text
+            
+            # Handle button clicks
+            if ctx.triggered and ctx.triggered[0]['prop_id'] != 'progress-update.n_intervals':
+                button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                
+                if button_id == 'btn-pause-resume' and hasattr(self.optimizer, 'is_paused'):
+                    if self.optimizer.is_paused:
+                        self.optimizer.resume()
+                    else:
+                        self.optimizer.pause()
+                
+                elif button_id == 'btn-stop' and hasattr(self.optimizer, 'is_running'):
+                    self.optimizer.stop()
+            
+            # Update status based on optimizer state
+            if hasattr(self.optimizer, 'is_running') and self.optimizer.is_running:
+                if hasattr(self.optimizer, 'is_paused') and self.optimizer.is_paused:
+                    status = "Optimization status: Paused"
+                    button_text = "Resume"
+                else:
+                    progress = getattr(self.optimizer, 'current_iteration', 0)
+                    max_iter = getattr(self.optimizer, 'pso_params', {}).max_iterations \
+                               if hasattr(self.optimizer, 'pso_params') else 100
+                    status = f"Optimization status: Running (Iteration {progress}/{max_iter})"
+                    button_text = "Pause"
+            else:
+                status = "Optimization status: Stopped"
+                button_text = "Pause/Resume"
+            
+            return status, button_text
 
-        # [Rest of the callbacks remain exactly the same...]
-        # 2. Main plot updates (triggered by interval or button changes)
+        # 3. Main plot updates (triggered by interval or button changes)
         @self.app.callback(
             [Output('stress-strain-plot', 'figure'),
              Output('stress-path-plot', 'figure'),
@@ -126,34 +185,25 @@ class CalibrationDashboard:
             prevent_initial_call=False
         )
         def update_plots(n_intervals, trigger, graph_mode):
-            #print("\n=== Starting plot update ===")  # Debug
- 
             # 1. Check calibrator state
-            # Validate calibrator state
             if not hasattr(self.calibrator, 'history'):
-                #print("ERROR: Calibrator missing history attribute")
                 return [self._create_empty_figure("Calibrator not initialized")] * 3 + [self._create_error_figure()]
                 
             if not self.calibrator.history:
-                #print("ERROR: No history data available")
                 return [self._create_empty_figure("No calibration runs yet")] * 3 + [self._create_error_figure()]
 
             current = self.calibrator.history[-1]
-            #print(f"DEBUG: Current history entry has {len(current['results'])} test(s)")
 
             # 2. Get visible tests from config
             try:
                 visible_tests = self.calibrator.config['output']['visualization']['visible_tests']
-                #print(f"DEBUG: Visible tests from config: {visible_tests}")
             except (KeyError, TypeError) as e:
-                #print(f"DEBUG: Config access error - using first available test: {str(e)}")
                 visible_tests = list(current['results'].keys())[:1]  # Fallback to first test
 
             # 3. Collect data for all visible tests
             test_data = []
             for test_name in visible_tests:
                 try:
-                    #print(f"DEBUG: Processing test {test_name}...")
                     exp_data = self.calibrator.data_loader.tests[test_name]
                     num_data = current['results'][test_name]
                     test_data.append({
@@ -162,21 +212,15 @@ class CalibrationDashboard:
                         'name': test_name,
                         'cell_pressure': exp_data.get('cell_pressure', 'N/A')
                     })
-                    #print(f"DEBUG: Added test {test_name} (pressure: {exp_data.get('cell_pressure', 'N/A')}kPa)")
                 except KeyError as e:
-                    #print(f"DEBUG: Skipping {test_name} - missing data: {str(e)}")
                     continue
                     
             if not test_data:
-                #print("DEBUG: No valid test data collected")
-                #print(f"ERROR: {error_msg}")
+                error_msg = "No valid test data available"
                 return [self._create_empty_figure(error_msg)] * 3 + [self._create_error_figure()]
-
 
             # 4. Create figures with all tests
             try:
-                #print(f"DEBUG: Creating figures for {len(test_data)} tests")
-                
                 figures = [
                     self._create_stress_strain_figure(test_data),
                     self._create_stress_path_figure(test_data),
@@ -192,7 +236,7 @@ class CalibrationDashboard:
                 print(f"ERROR: {error_msg}")
                 return [self._create_empty_figure(error_msg)] * 3 + [self._create_error_figure()]
     
-        # 3. Parameter updates (triggered by interval only)
+        # 4. Parameter updates (triggered by interval only)
         @self.app.callback(
             [Output('parameter-display', 'children'),
              Output('parameter-ranges', 'children')],
@@ -209,10 +253,8 @@ class CalibrationDashboard:
                 self._create_parameter_ranges()
             )
 
-    # [All figure creation methods remain exactly the same...]
- 
+    # [All figure creation methods remain the same as in your original code]
     def _create_stress_strain_figure(self, test_data):
-        #print(f"DEBUG: Creating stress-strain plot with {len(test_data)} tests")
         fig = go.Figure()
         
         for data in test_data:
@@ -241,7 +283,6 @@ class CalibrationDashboard:
         return fig
 
     def _create_stress_path_figure(self, test_data):
-        #print(f"DEBUG: Creating stress-path plot with {len(test_data)} tests")
         fig = go.Figure()
         
         for data in test_data:
@@ -270,7 +311,6 @@ class CalibrationDashboard:
         return fig
 
     def _create_volumetric_figure(self, test_data):
-        #print(f"DEBUG: Creating volumetric plot with {len(test_data)} tests")
         fig = go.Figure()
         
         for data in test_data:
@@ -300,7 +340,6 @@ class CalibrationDashboard:
         return fig
 
     def _create_pore_pressure_figure(self, test_data):
-        #print(f"DEBUG: Creating pore pressure plot with {len(test_data)} tests")
         fig = go.Figure()
         
         for data in test_data:
@@ -314,7 +353,6 @@ class CalibrationDashboard:
                     'p' not in exp or 
                     'StrainYY' not in exp or
                     not isinstance(exp['p'], (np.ndarray, list))):
-                    print(f"DEBUG: Skipping {data['name']} - missing/invalid fields")
                     continue
                     
                 # Convert to numpy arrays for safe math operations
@@ -361,18 +399,34 @@ class CalibrationDashboard:
 
     def _create_error_figure(self):
         fig = go.Figure()
+        
+        # First plot calibrator history if available
         if hasattr(self.calibrator, 'history') and self.calibrator.history:
             errors = [entry['error'] for entry in self.calibrator.history]
             fig.add_trace(go.Scatter(
                 x=list(range(len(errors))),
                 y=errors,
                 mode='lines+markers',
+                name='Calibration Error',
                 line=dict(color='red', width=2)
             ))
+        
+        # Then add PSO history if available
+        if hasattr(self, 'optimizer') and hasattr(self.optimizer, 'best_fitness_history') and self.optimizer.best_fitness_history:
+            fig.add_trace(go.Scatter(
+                x=list(range(len(self.optimizer.best_fitness_history))),
+                y=self.optimizer.best_fitness_history,
+                mode='lines+markers',
+                name='PSO Best Fitness',
+                line=dict(color='blue', width=2)
+            ))
+            
         fig.update_layout(
+            title='Optimization Progress',
             xaxis_title='Iteration',
             yaxis_title='Error (RMSE)',
-            margin=dict(l=40, r=40, t=40, b=40)
+            margin=dict(l=40, r=40, t=40, b=40),
+            showlegend=True
         )
         return fig
 
@@ -415,6 +469,7 @@ class CalibrationDashboard:
                     html.Td("")
                 ]))
         return html.Table([html.Tbody(rows)], style={'width': '100%'})
+        
     def _create_empty_figure(self, message="No data available"):
         """Create a figure with an error message"""
         fig = go.Figure()

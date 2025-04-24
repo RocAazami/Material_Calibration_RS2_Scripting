@@ -1,15 +1,45 @@
 material_model: "NorSand"
 
-# Added parallel processing configuration
+# Parallel processing configuration
 parallel_processing:
-  workers: 3  # Number of parallel workers
-  modeler_base_port: 60054  # Base port for modelers
-  interpreter_base_port: 60154  # Base port for interpreters
+  port_allocation: "dynamic"  # or "static"
+  worker_reuse: true
+  max_reuse_count: 10  # how many times to reuse an instance before restarting
+  port_range: [60000, 60100]  # Range of ports to use
+  workers: 10  # Number of parallel workers
+  modeler_base_port: 60054  # Base port for modelers (used when port_allocation="static")
+  interpreter_base_port: 60154  # Base port for interpreters (used when port_allocation="static")
 
+# Optimization configuration
+optimization:
+  method: "pso"  # Options: "pso", "hybrid", or "original"
+  
+  # Common settings
+  max_iterations: 100        # Global maximum iterations
+  tolerance: 1e-6           # Convergence tolerance
+  
+  # PSO-specific settings
+  pso:
+    particles_per_worker: 1  # New: Particles per worker (1:1 ratio)
+    cognitive_weight: 1.5
+    social_weight: 1.5
+    inertia_weight: 0.7
+    min_inertia: 0.4
+    max_inertia: 0.9    
+  
+  # Hybrid DE+LBFGS settings
+  hybrid:
+    de_max_iter: 20          # Differential Evolution iterations
+    de_popsize: 15           # DE population size
+    de_tol: 0.01            # DE tolerance
+    lbfgs_max_iter: 50       # L-BFGS-B iterations after DE
+
+# Base model definitions
 base_models:
-  drained_100: "RS2_Models/NorSand - UTC - p0=100-Base Model.fez"  # Base models now in RS2_Models
+  drained_100: "RS2_Models/NorSand - UTC - p0=100-Base Model.fez"
   drained_200: "RS2_Models/NorSand - UTC - p0=200-Base Model.fez"
 
+# Experimental data sets
 experimental_data:
   - type: "drained_100"
     filepath: "data/drained/100kPa.csv"
@@ -25,15 +55,13 @@ experimental_data:
     weight: 0.8
     base_model: "$base_models.drained_200"
 
+# Parameters to calibrate with their bounds
 parameters:
-  M_tc: [1.2, 1.8]    
-  H_0: [50, 300]    
-  psi_0: [-0.05, 0.05]
+  M_tc: [1.2, 1.8]     # Critical state friction ratio
+  H_0: [50, 300]       # Plastic modulus
+  psi_0: [-0.05, 0.05] # Initial state parameter
 
-optimization:
-  method: "hybrid"
-  max_iterations: 20
-
+# Output configuration
 output:
   directory: "RS2_Models"
   report_file: "calibration_report.html"
